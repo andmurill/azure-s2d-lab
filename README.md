@@ -6,9 +6,9 @@
 ![Terraform](https://img.shields.io/badge/Terraform-1.17-7B42BC?logo=terraform&logoColor=white)
 ![Azure](https://img.shields.io/badge/Azure-centralus-0078D4?logo=microsoftazure&logoColor=white)
 ![Windows Server](https://img.shields.io/badge/Windows%20Server-2022-0078D6?logo=windows&logoColor=white)
-![Storage Spaces Direct](https://img.shields.io/badge/Storage%20Spaces%20Direct-2%20nodes-2EA44F)
+![Storage Spaces Direct](https://img.shields.io/badge/Storage%20Spaces%20Direct-2--3%20nodes-2EA44F)
 
-**One `terraform apply` builds a domain, a two-node cluster, pools eight Premium SSDs with Storage Spaces Direct and serves a mirrored Cluster Shared Volume.**
+**One `terraform apply` builds a domain and a two-node cluster, turns eight Premium SSDs into one Storage Spaces Direct pool, and creates a mirrored volume on it that the cluster serves as a Cluster Shared Volume.**
 
 [What it builds](#what-it-builds) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Design decisions](#design-decisions-and-trade-offs) · [Verification](#verification-and-failover-test) · [Troubleshooting](#troubleshooting-log) · [Roadmap](#roadmap)
 
@@ -54,6 +54,31 @@ flowchart LR
 - The VNet's DNS server is DC01, so the nodes can find the `s2d.local` domain.
 - The two nodes sit in an **availability set**, which S2D in Azure VMs requires and which cannot be added to a VM after it is created.
 - Every VM has a nightly auto-shutdown schedule.
+
+### Storage layout
+
+S2D pools the data disks into **one** storage pool. A volume is a virtual disk carved out of that pool, so the disks are pooled and the volumes are what you use.
+
+```mermaid
+flowchart LR
+  subgraph disks["Physical data disks: 128 GB Premium SSD each"]
+    d1["S2DN1: 4 disks"]
+    d2["S2DN2: 4 disks"]
+  end
+  d1 --> pool[("One S2D pool<br/>S2D on S2D-CLUS")]
+  d2 --> pool
+  pool --> v1["Volume1<br/>virtual disk, two-way mirror, 200 GB<br/>served as a CSV"]
+  pool --> ph["ClusterPerformanceHistory<br/>virtual disk created by S2D, 24 GB"]
+```
+
+| Layer | Default build (2 nodes) | Optional (3 nodes and extra volumes) |
+|---|---|---|
+| Nodes | `S2DN1`, `S2DN2` | adds `S2DN3` |
+| Physical data disks | 8 x 128 GB | 12 x 128 GB |
+| Storage pool | one pool, 1,090,913,304,576 bytes (about 1,016 GiB) | one pool, 1,636,369,956,864 bytes (about 1,524 GiB). The new node's disks join the pool on their own |
+| Volumes (virtual disks) | `Volume1`: 200 GB two-way mirror, served as a CSV. `ClusterPerformanceHistory`: 24 GB mirror, created by S2D | `Volume1` is unchanged. `Volume2`: 100 GB three-way mirror. `Volume3`: 50 GB from the `MirrorOnHDD` template. All three are CSVs |
+
+The three-node setup and the extra volumes were tested by extending the running two-node lab with the `terraform.tfvars` block in the quick start, not by a clean three-node deploy. The timed build is the two-node default.
 
 ## What this demonstrates
 

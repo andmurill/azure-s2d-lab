@@ -14,7 +14,7 @@
   <!-- Text -->
   <text x="60" y="112" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="46" font-weight="700" fill="#ffffff">Azure S2D Lab</text>
   <text x="60" y="162" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24" fill="#9cc9ff">Storage Spaces Direct &#183; Windows Server 2022 &#183; Terraform</text>
-  <text x="60" y="206" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#c9d6e8">One apply builds a cluster, pools 8 Premium SSDs and serves a CSV</text>
+  <text x="60" y="206" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#c9d6e8">One apply turns 8 Premium SSDs into 1 S2D pool and a mirrored CSV volume</text>
 
   <!-- Diagram: cluster, nodes, domain controller, witness -->
   <g font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" text-anchor="middle">
