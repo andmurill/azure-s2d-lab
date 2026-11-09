@@ -1,8 +1,3 @@
-resource "time_sleep" "wait_for_nodes" {
-  depends_on      = [azurerm_virtual_machine_extension.node_join]
-  create_duration = "4m"
-}
-
 locals {
   node_list_ps = join(", ", [for n in sort(keys(var.node_names)) : "'${n}'"])
   first_node   = sort(keys(var.node_names))[0]
@@ -18,7 +13,13 @@ locals {
       } | Select-Object PSComputerName, Success, RestartNeeded | Format-Table | Out-String | Write-Output
 
       if (Get-Cluster -ErrorAction SilentlyContinue) {
-        Write-Output 'Cluster already exists - nothing to do.'
+        Write-Output 'Cluster already exists.'
+        foreach ($n in $nodes) {
+          if (-not (Get-ClusterNode -Name $n -ErrorAction SilentlyContinue)) {
+            Add-ClusterNode -Name $n | Out-Null
+            Write-Output ('Added node ' + $n + ' to the cluster.')
+          }
+        }
       } else {
         New-Cluster -Name ${var.cluster_name} -Node $nodes -NoStorage -ManagementPointNetworkType Distributed | Out-Null
         Write-Output 'Cluster created.'
@@ -87,7 +88,7 @@ locals {
 }
 
 resource "azurerm_virtual_machine_run_command" "create_cluster" {
-  name               = "create-cluster"
+  name               = "create-cluster-${substr(md5(local.cluster_script), 0, 6)}"
   location           = azurerm_resource_group.lab.location
   virtual_machine_id = azurerm_windows_virtual_machine.node[local.first_node].id
 
@@ -115,5 +116,5 @@ resource "azurerm_virtual_machine_run_command" "create_cluster" {
     value = azurerm_storage_account.witness.primary_access_key
   }
 
-  depends_on = [time_sleep.wait_for_nodes]
+  depends_on = [azurerm_virtual_machine_run_command.wait_for_join]
 }

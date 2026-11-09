@@ -128,3 +128,18 @@ variable "s2d_volume_size_gb" {
   type        = number
   default     = 200
 }
+
+variable "s2d_extra_volumes" {
+  description = "Extra S2D volumes to create, by name. copies = 0 lets S2D choose, 2 or 3 sets the mirror copies. tier_template (for example MirrorOnHDD) creates the volume from that storage tier."
+  type = map(object({
+    size_gb       = number
+    copies        = optional(number, 0)
+    tier_template = optional(string, "")
+  }))
+  default = {}
+
+  validation {
+    condition     = alltrue([for v in values(var.s2d_extra_volumes) : contains([0, 2, 3], v.copies) && v.size_gb >= 10])
+    error_message = "Each extra volume needs size_gb of at least 10 and copies of 0, 2 or 3."
+  }
+}

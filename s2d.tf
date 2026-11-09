@@ -1,4 +1,25 @@
 locals {
+  # PowerShell arguments for each extra volume
+  s2d_volume_args = {
+    for name, v in var.s2d_extra_volumes : name => (
+      v.tier_template != ""
+      ? "-StorageTierFriendlyNames '${v.tier_template}' -StorageTierSizes ${v.size_gb}GB"
+      : (v.copies > 0 ? "-Size ${v.size_gb}GB -NumberOfDataCopies ${v.copies}" : "-Size ${v.size_gb}GB")
+    )
+  }
+
+  # One guarded New-Volume block per extra volume
+  s2d_extra_volumes_ps = join("\n", [
+    for name, args in local.s2d_volume_args : join("\n", [
+      "if (Get-VirtualDisk -FriendlyName '${name}' -ErrorAction SilentlyContinue) {",
+      "  Write-Output '${name} already exists - nothing to do.'",
+      "} else {",
+      "  New-Volume -StoragePoolFriendlyName 'S2D*' -FriendlyName '${name}' -FileSystem CSVFS_ReFS ${args} | Out-Null",
+      "  Write-Output '${name} created.'",
+      "}",
+    ])
+  ])
+
   s2d_worker_script = <<-EOT
     $ErrorActionPreference = 'Stop'
     Start-Transcript -Path 'C:\s2d-worker.log' -Append | Out-Null
@@ -43,6 +64,9 @@ locals {
         New-Volume -StoragePoolFriendlyName 'S2D*' -FriendlyName 'Volume1' -FileSystem CSVFS_ReFS -Size ${var.s2d_volume_size_gb}GB | Out-Null
         Write-Output 'Volume1 created.'
       }
+
+      Write-Output '--- Create the extra volumes (if any)'
+      ${local.s2d_extra_volumes_ps}
 
       Write-Output '--- Failover test: move the core cluster group to every node and back'
       foreach ($n in ($nodes + $nodes[0])) {
@@ -101,7 +125,8 @@ locals {
 }
 
 resource "azurerm_virtual_machine_run_command" "enable_s2d" {
-  name               = "enable-s2d"
+  # The name carries a hash of the script so a changed script always runs as a new command.
+  name               = "enable-s2d-${substr(md5(local.s2d_script), 0, 6)}"
   location           = azurerm_resource_group.lab.location
   virtual_machine_id = azurerm_windows_virtual_machine.node[local.first_node].id
 
@@ -117,6 +142,11 @@ resource "azurerm_virtual_machine_run_command" "enable_s2d" {
   protected_parameter {
     name  = "AdminPassword"
     value = random_password.admin.result
+  }
+
+  # The guest worker allows up to 40 minutes, so Terraform must wait longer than its 30-minute default.
+  timeouts {
+    create = "45m"
   }
 
   depends_on = [

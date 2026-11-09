@@ -85,11 +85,6 @@ resource "azurerm_virtual_machine_run_command" "node_prep" {
   depends_on = [azurerm_virtual_machine_data_disk_attachment.s2d]
 }
 
-resource "time_sleep" "wait_for_dc" {
-  depends_on      = [azurerm_virtual_machine_extension.dc01_promote]
-  create_duration = "5m"
-}
-
 resource "azurerm_virtual_machine_extension" "node_join" {
   for_each             = var.node_names
   name                 = "join-domain"
@@ -110,7 +105,7 @@ resource "azurerm_virtual_machine_extension" "node_join" {
   })
 
   depends_on = [
-    time_sleep.wait_for_dc,
+    azurerm_virtual_machine_run_command.wait_for_dc,
     azurerm_virtual_machine_run_command.node_prep,
   ]
 }
