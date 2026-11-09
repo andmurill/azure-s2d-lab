@@ -1,6 +1,6 @@
-<div align="center">
+﻿<div align="center">
 
-<img src="docs/images/banner.svg" alt="Azure S2D Lab: Storage Spaces Direct, Windows Server 2022, Terraform" width="100%">
+<img src="docs/images/banner-s2d.svg" alt="Azure S2D Lab: Storage Spaces Direct, Windows Server 2022, Terraform" width="100%">
 
 [![terraform-checks](https://github.com/andmurill/azure-s2d-lab/actions/workflows/terraform.yml/badge.svg)](https://github.com/andmurill/azure-s2d-lab/actions/workflows/terraform.yml)
 ![Terraform](https://img.shields.io/badge/Terraform-1.17-7B42BC?logo=terraform&logoColor=white)
@@ -10,7 +10,7 @@
 
 **One `terraform apply` builds a domain, a two-node cluster, pools eight Premium SSDs with Storage Spaces Direct and serves a mirrored Cluster Shared Volume.**
 
-[What it builds](#what-it-builds) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Design decisions](#design-decisions-and-trade-offs) · [Verification](#verification-and-failover-test) · [Troubleshooting](#troubleshooting-log) · [Roadmap](#roadmap)
+[What it builds](#what-it-builds) Â· [Quick start](#quick-start) Â· [How it works](#how-it-works) Â· [Design decisions](#design-decisions-and-trade-offs) Â· [Verification](#verification-and-failover-test) Â· [Troubleshooting](#troubleshooting-log) Â· [Roadmap](#roadmap)
 
 </div>
 
@@ -315,7 +315,7 @@ Real problems hit while building this lab.
 | `outputs.tf` | IPs, admin user, node names, disks per node, and the sensitive password and witness key |
 | `terraform.tfvars.example` | Template for your private `terraform.tfvars` |
 | `scripts/measure-deploy.ps1` | Times plan and apply and writes a per-resource report |
-| `docs/images/banner.svg` | README banner |
+| `docs/images/banner-s2d.svg` | README banner |
 | `.github/workflows/terraform.yml` | `fmt -check`, `init -backend=false` and `validate` on every push |
 
 </details>
