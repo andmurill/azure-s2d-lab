@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" role="img" aria-labelledby="title desc">
   <title id="title">Azure Storage Spaces Direct Lab</title>
   <desc id="desc">Banner showing a two-node cluster with S2D pooled data disks, a domain controller and a cloud witness</desc>
@@ -13,7 +13,7 @@
 
   <!-- Text -->
   <text x="60" y="112" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="46" font-weight="700" fill="#ffffff">Azure S2D Lab</text>
-  <text x="60" y="162" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24" fill="#9cc9ff">Storage Spaces Direct Â· Windows Server 2022 Â· Terraform</text>
+  <text x="60" y="162" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24" fill="#9cc9ff">Storage Spaces Direct &#183; Windows Server 2022 &#183; Terraform</text>
   <text x="60" y="206" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#c9d6e8">One apply builds a cluster, pools 8 Premium SSDs and serves a CSV</text>
 
   <!-- Diagram: cluster, nodes, domain controller, witness -->
@@ -41,7 +41,7 @@
 
     <!-- domain controller -->
     <rect x="875" y="215" width="130" height="40" rx="10" fill="#13365f" stroke="#5aa9ff" stroke-width="2"/>
-    <text x="940" y="240" fill="#ffffff">DC01 Â· AD DS</text>
+    <text x="940" y="240" fill="#ffffff">DC01 &#183; AD DS</text>
   </g>
 </svg>
 
