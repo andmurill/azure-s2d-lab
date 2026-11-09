@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <img src="docs/images/banner-s2d.svg" alt="Azure S2D Lab: Storage Spaces Direct, Windows Server 2022, Terraform" width="100%">
 
@@ -10,7 +10,7 @@
 
 **One `terraform apply` builds a domain, a two-node cluster, pools eight Premium SSDs with Storage Spaces Direct and serves a mirrored Cluster Shared Volume.**
 
-[What it builds](#what-it-builds) Â· [Quick start](#quick-start) Â· [How it works](#how-it-works) Â· [Design decisions](#design-decisions-and-trade-offs) Â· [Verification](#verification-and-failover-test) Â· [Troubleshooting](#troubleshooting-log) Â· [Roadmap](#roadmap)
+[What it builds](#what-it-builds) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Design decisions](#design-decisions-and-trade-offs) · [Verification](#verification-and-failover-test) · [Troubleshooting](#troubleshooting-log) · [Roadmap](#roadmap)
 
 </div>
 
