@@ -22,11 +22,11 @@ This is the storage-enabled sibling of my [azure-wsfc-lab](https://github.com/an
 
 | | |
 |---|---|
-| **Result** | AD DS forest `s2d.local`, a two-node cluster `S2D-CLUS` with a cloud witness, an S2D pool of 8 data disks and a 200 GB two-way mirror volume `Volume1` as a CSV |
-| **Size** | 3 VMs (`Standard_B2ms`), 8 x 128 GB Premium SSD data disks, 1 availability set. `terraform plan` prints the exact resource count |
-| **Tested with** | Terraform 1.17.0, azurerm 4.81.0, region `centralus`, tested 2026-11-08 |
-| **Build time** | Not measured yet. The network, domain and cluster stages match the WSFC lab, which took about 24 minutes. The S2D stage is on the [roadmap](#roadmap) to time |
-| **Skills shown** | Terraform (`for_each`, `setproduct`, `depends_on`), Azure compute and managed disks, S2D in guest VMs, unattended AD DS and clustering, troubleshooting |
+| **Result** | AD DS forest `s2d.local`, a failover cluster `S2D-CLUS` with a cloud witness, an S2D pool built from the data disks and a 200 GB two-way mirror volume `Volume1` as a CSV. A third node and extra volumes are optional |
+| **Size** | 44 Terraform resources in the measured two-node build: 3 VMs (`Standard_B2ms`), 8 x 128 GB Premium SSD data disks and 1 availability set, split into three modules |
+| **Measured build time** | 29 min 17 s from an empty resource group: plan 23 s, apply 28 min 54 s (measured 2026-11-09 UTC, before the module refactor). It is re-measured on the modules in a final run |
+| **Tested with** | Terraform 1.17.0, azurerm 4.81.0, region `centralus`, tested 2026-11-08 and 2026-11-09. Also tested with three nodes and extra volumes |
+| **Skills shown** | Terraform (modules, `moved` blocks, `for_each`, `setproduct`), Azure compute and managed disks, S2D in guest VMs, unattended AD DS and clustering, readiness checks, troubleshooting |
 
 ## What it builds
 
@@ -75,17 +75,32 @@ flowchart TD
   N --> D1["8 managed disks, attached with caching = None"]
   D1 --> P["Run Command on each node:<br/>HwTimeout = 30000"]
   B --> C["Promote DC01 to s2d.local<br/>Custom Script Extension"]
-  C --> D["Wait 5 min for the DC reboot"]
-  D --> E["Domain-join the nodes (restart applies HwTimeout)"]
+  C --> R1["Readiness check 1 (on a node):<br/>LDAP, ADWS and DNS answer 3 times in a row"]
+  R1 --> E["Domain-join the nodes (restart applies HwTimeout)"]
   P --> E
-  E --> F["Wait 4 min for the node reboots"]
-  F --> G["Run Command on S2DN1:<br/>create cluster, cloud witness"]
+  E --> R2["Readiness check 2 (on DC01):<br/>each node's boot time is after its join time"]
+  R2 --> G["Run Command on S2DN1:<br/>create cluster, cloud witness"]
   W --> G
-  G --> S["Run Command on S2DN1:<br/>validate, Enable-ClusterS2D, Volume1, failover test"]
+  G --> S["Run Command on S2DN1:<br/>validate, Enable-ClusterS2D, volumes, failover test"]
   D1 --> S
 ```
 
-The S2D stage runs as a scheduled task under the domain admin account and logs to `C:\enable-s2d.log` and `C:\s2d-worker.log` on the first node.
+The S2D stage runs as a scheduled task under the domain admin account and logs to `C:\enable-s2d.log` and `C:\s2d-worker.log` on the first node. The readiness check on DC01 logs to `C:\wait-for-join.log`.
+
+Measured with `scripts/measure-deploy.ps1` on an empty resource group (two nodes, before the module refactor). The stages run one after the other on the critical path:
+
+| Stage | Time |
+|---|---|
+| Network and the DC01 VM, before the promotion starts | about 1 min 34 s |
+| DC01 promotion extension (the node VMs, disks and node prep finish in parallel, by about 4 min 48 s) | 8 min 17 s |
+| Readiness check 1: wait for the domain controller | 2 min 05 s |
+| Node domain joins (in parallel) | about 25 s |
+| Readiness check 2: wait for the joins | 5 min 10 s |
+| Cluster creation and witness (Run Command) | 5 min 24 s |
+| S2D stage (Run Command) | 5 min 52 s |
+| **Plan 23 s + apply 28 min 54 s** | **29 min 17 s** |
+
+Readiness check 1 took 2 min 05 s, against the 5 minutes of the fixed wait it replaced. The 5 min 10 s for check 2 is the first version of that check, which fell back to a fixed 5-minute rule because it never saw the node restart. It was replaced by a boot-time comparison. When the third node was added, the new check passed 42 seconds after that node's join. The final timed run uses the new check.
 
 ## Quick start
 
@@ -146,6 +161,23 @@ Create `terraform.tfvars` (git-ignored) with your public IP, the only address al
 allowed_rdp_cidr = "203.0.113.10/32"
 ```
 
+Optional: a third node and extra volumes (a three-way mirror volume, and a volume from the `MirrorOnHDD` template):
+
+```hcl
+node_names = {
+  S2DN1 = "10.10.1.11"
+  S2DN2 = "10.10.1.12"
+  S2DN3 = "10.10.1.13"
+}
+
+s2d_extra_volumes = {
+  Volume2 = { size_gb = 100, copies = 3 }
+  Volume3 = { size_gb = 50, tier_template = "MirrorOnHDD" }
+}
+```
+
+Changing these on a running lab adds the node (with `Add-ClusterNode`) and creates the volumes.
+
 ### 4. Deploy
 
 ```powershell
@@ -179,13 +211,19 @@ This removes the whole lab, including the eight data disks. The state storage ac
 
 ## How it works
 
-**Network, domain controller and join.** Unchanged from the WSFC lab. DC01 is promoted by a Custom Script Extension, a `time_sleep` waits for its reboot, and `JsonADDomainExtension` joins each node.
+**Modules.** The root calls three modules: `network` (resource group, VNet, subnet, NSG), `domain_controller` (DC01, its public IP and the AD DS promotion) and `cluster` (the nodes, data disks, witness, readiness checks, cluster and S2D). The password is generated in the root and passed down as a sensitive input. Because the code was refactored from a single directory while the lab was running, `moved.tf` records where every resource went, and the refactor planned zero changes to Azure.
+
+**Domain controller and join.** DC01 is promoted by a Custom Script Extension that installs AD DS and runs `Install-ADDSForest` with `-NoRebootOnCompletion`, then schedules a restart 30 seconds later. The nodes are joined with `JsonADDomainExtension`. A `terraform_data` placeholder in the cluster module carries the dependency on the promotion across the module boundary, so the node VMs and disks still build in parallel with it.
+
+**Readiness checks** (`readiness.tf`). Two Run Commands replace the fixed waits:
+1. Before the joins, a node polls DC01 until LDAP (389), AD Web Services (9389) and DNS answer three times in a row.
+2. After the joins, DC01 reads each node's real boot time over WinRM (as the domain admin) and waits until it is later than the time the node's computer account was created. A boot after the join means the join restart is done.
 
 **Nodes and disks** (`nodes.tf`, `s2d_storage.tf`). The nodes are created with `for_each` inside one availability set. `setproduct(keys(var.node_names), range(var.s2d_disk_count))` builds a map with one entry per node and disk (`S2DN1-disk0` and so on). Each entry becomes an empty managed disk and an attachment with a fixed LUN and `caching = "None"`. Changing `s2d_disk_count`, `s2d_disk_size_gb` or the node map reshapes the storage without touching other code.
 
-**Guest preparation** (`nodes.tf`). A Run Command on each node sets `HKLM\SYSTEM\CurrentControlSet\Services\spaceport\Parameters\HwTimeout` to 30000 (30 seconds), the longer storage timeout that S2D in a guest VM needs. The domain join depends on it, so the join's restart is the restart that applies the value.
+**Guest preparation** (`nodes.tf`). A Run Command on each node sets `HKLM\SYSTEM\CurrentControlSet\Services\spaceport\Parameters\HwTimeout` to 30000 (30 seconds), the longer storage timeout that S2D in a guest VM needs. The domain join depends on it, so the join's restart applies the value.
 
-**Cluster and witness** (`cluster.tf`). The same logic as the WSFC lab, generalised over the node map: install Failover Clustering on every node, `New-Cluster -NoStorage` with a distributed network name, then `Set-ClusterQuorum -CloudWitness`. A worker script runs as a scheduled task under the domain admin so it keeps network credentials.
+**Cluster and witness** (`cluster.tf`). Install Failover Clustering on every node, `New-Cluster -NoStorage` with a distributed network name, then `Set-ClusterQuorum -CloudWitness`. If the cluster already exists, any node that is missing is added with `Add-ClusterNode`, which is how a third node joins a running lab. A worker script runs as a scheduled task under the domain admin so it keeps network credentials.
 
 **Storage Spaces Direct** (`s2d.tf`). After the cluster exists and the disks are attached, a Run Command on the first node writes a worker script and runs it as a scheduled task. The worker:
 
@@ -193,10 +231,11 @@ This removes the whole lab, including the eight data disks. The state storage ac
 2. Runs `Enable-ClusterS2D` unless an S2D pool already exists.
 3. Disables automatic drive replacement in the Health Service (with a retry loop, see the [troubleshooting log](#troubleshooting-log)).
 4. Creates `Volume1` as `CSVFS_ReFS` if it does not exist.
-5. Moves the core cluster group to every node and back.
-6. Prints the pool, physical disks, virtual disks, tiers and CSV state.
+5. Creates any extra volumes from `s2d_extra_volumes`, each guarded by an existence check.
+6. Moves the core cluster group to every node and back.
+7. Prints the pool, physical disks, virtual disks, tiers and CSV state.
 
-Every step is guarded, so a re-run is safe. For reference, the automation is equivalent to:
+Every step is guarded, so a re-run is safe. The Run Commands carry a short hash of their script in their name, so a changed script always runs as a new command (see the design decisions). For reference, the automation is equivalent to:
 
 ```powershell
 Test-Cluster -Node S2DN1,S2DN2 -Include 'Storage Spaces Direct','Inventory','Network','System Configuration'
@@ -217,7 +256,12 @@ New-Volume -StoragePoolFriendlyName 'S2D*' -FriendlyName 'Volume1' -FileSystem C
 | `HwTimeout` set before the domain join | The join restarts the node anyway, so the value takes effect without an extra reboot. | Ties the join to a prep step. |
 | Scheduled task under the domain admin | Run Command runs as SYSTEM, which cannot create the cluster object or reach the other node. A task logon keeps the credentials. | More moving parts than one script. |
 | Enable S2D first, then set the health setting | The Health Service does not exist until S2D is enabled. | A retry loop is needed because it can lag behind. |
-| `time_sleep` between stages | Extensions report success before the VM restarts. | Fixed delays, not readiness checks. |
+| Readiness checks instead of `time_sleep` | Extensions report success before the VM restarts, and a fixed wait is either too long or too short. The checks poll the real condition: the DC answers LDAP, ADWS and DNS, and each node's boot time is after its join. | Each check is a Run Command that needs a machine to run on (a node for the first, DC01 for the second), and the second needs the domain admin credentials. |
+| Run Command names carry a hash of the script | A Run Command re-created under the same name was not run again by the guest, and an in-place update lost the protected password parameter. A new name forces a real replace and a fresh run. | Names change whenever the script changes, and the old command is deleted. |
+| 45-minute create timeout on the S2D step | The worker allows 40 minutes, but Terraform's default create timeout is 30. | None. The timeout only matters on a failure. |
+| Modules with `moved` blocks | Smaller files and clear inputs and outputs, and a live lab was refactored with a plan of zero changes. | The modules live inside this repo and are not published for reuse yet. |
+| `terraform_data` placeholder for the DC dependency | It passes the promotion dependency into the cluster module without making the whole module wait, so the node VMs and disks still build in parallel. | One extra resource in state. |
+| Extra volumes defined by a variable | `s2d_extra_volumes` creates named volumes (size, mirror copies or a tier template) without code changes. | `Volume1` is still sized by `s2d_volume_size_gb`. |
 | Separate state key `s2d-lab.tfstate` | The two labs can be built and destroyed independently. | Both default to the same address space, so change `prefix` and the ranges to run them together. |
 | Two nodes by default | Two nodes with a witness is the smallest supported S2D cluster. Azure guidance allows two or three. | A two-way mirror survives one failure, not two. |
 
@@ -253,6 +297,19 @@ Core cluster group owner: S2DN1
 
 Azure reports the data disks with media type `HDD`. S2D still pools them and the volume works. Because of that media type, tier templates such as `MirrorOnHDD` may exist, which is on the roadmap to try.
 
+**Three nodes and extra volumes.** The lab was then extended in place with a third node and two extra volumes, using the `terraform.tfvars` block above:
+
+| Check | Result |
+|---|---|
+| Cluster nodes | `S2DN1`, `S2DN2` and `S2DN3` all `Up` |
+| Storage pool | 1,636,369,956,864 bytes, which is 12 disks of 128 GB. The new node's four disks joined the pool on their own, and the optimize job (`S2D on S2D-CLUS-Optimize`) completed at 100% |
+| `Volume1` | two-way mirror, 200 GB, `Healthy` (existing volumes are not converted when a node is added) |
+| `Volume2` | three-way mirror (`NumberOfDataCopies 3`), 100 GB, `Healthy` |
+| `Volume3` | 50 GB from the `MirrorOnHDD` template, `Healthy`. Azure reports the data disks as HDD, so this is a mirror volume from the template, not a performance-plus-capacity tier |
+| Cluster shared volumes | all three `Online` |
+
+The join check log on DC01 (`C:\wait-for-join.log`) shows each node's boot time against its join time. For the third node the join was at 03:51:28 UTC, the boot at 03:51:43 and the check passed at 03:52:10.
+
 ## Cost and cleanup
 
 - Three `Standard_B2ms` VMs, StandardSSD OS disks, eight 128 GB Premium SSDs, a Standard static public IP and a small storage account. Check current prices for your region.
@@ -277,9 +334,9 @@ Azure reports the data disks with media type `HDD`. S2D still pools them and the
 **Known limitations (this is a lab)**
 - One generated password is used for the local admin, the domain admin and the DSRM password, and it is stored in Terraform state. Production designs should use Key Vault and separate secrets.
 - The nodes reach the witness storage endpoint through default outbound access, which is being phased out for new virtual networks. A NAT gateway or a storage service endpoint is the durable fix.
-- The 5-minute and 4-minute waits are time-based, so a slow region might need longer values.
+- The readiness checks have a 20-minute and a 25-minute deadline and were verified on this lab only, so a very slow region might need longer values.
 - The S2D worker polls for the Health Service but the whole stage has a 40-minute deadline.
-- Two nodes only by default. A third node needs `Add-ClusterNode`, which is not automated yet.
+- Two nodes by default. A third node is supported through `node_names`, but nodes beyond three were not tested.
 - Single domain controller, and CI checks syntax and validity only. It does not deploy anything.
 
 ## Troubleshooting log
@@ -293,6 +350,14 @@ Real problems hit while building this lab.
 | The plan after the fix still carried the old script | The edited `s2d.tf` had not reached the working folder, so Terraform read the old file | Compared the file sizes, copied it again and re-planned. Always read the plan's script change before applying |
 | `Test-Cluster` printed a validation warning during the S2D stage | Validation reports warnings for the Azure environment, for example around networking | The worker treats validation as informational and logs the report path, then continues. Review the HTML report before relying on a cluster outside a lab |
 | Disks report `MediaType HDD` | Observed in the guest. The lab did not investigate why | Not an error. The pool and volume work, and a tiered `MirrorOnHDD` volume is a roadmap item |
+| An in-place update of a Run Command failed: "Register-ScheduledTask : Cannot validate argument on parameter 'Password'. The argument is null or empty" | The password is a protected parameter, which Terraform cannot read back from Azure, and the update did not carry it | Replaced the Run Command instead of updating it. Putting a hash of the script in the name now forces a replace automatically |
+| A replaced Run Command finished in 49 seconds without running the script, and an earlier one hung until Terraform timed out | A Run Command re-created under the same name was not executed again by the guest (observed behaviour, I did not confirm the cause on the Azure side) | Added a short hash of the script to the Run Command name, so every script change is a new command that runs |
+| `polling after CreateOrUpdate: context deadline exceeded` after 30 minutes on the S2D step | Terraform's default create timeout is 30 minutes and the guest worker allows 40, and in this case the command never started | Added `timeouts { create = "45m" }` to the S2D Run Command |
+| `az vm run-command invoke` failed with "Run command extension execution is in progress" (Conflict), and later hung | The timed-out `enable-s2d` command was still marked as running on the VM, and the nightly auto-shutdown later deallocated the VMs | Read the logs over RDP through DC01, deleted the orphan with `az vm run-command delete`, and started DC01 first, then the nodes |
+| The first join check took 5 min 10 s, longer than the 4-minute wait it replaced | It never saw the node go down, so it fell back to its rule that the computer account must be 5 minutes old | Replaced it with a comparison of each node's real boot time against its join time. On the third node it passed 42 seconds after the join |
+| The timing report showed one minute too many for any value with 30 or more seconds | `Format-Span` used `[int]` on the minutes, which rounds | Switched to `[math]::Floor`. The first S2D build is 29 min 17 s, not 30 min 17 s |
+| `Â·` appeared in the README and the banner after editing them in PowerShell | Windows PowerShell read the UTF-8 files with the system code page and wrote them back damaged | Read and write the files with explicit UTF-8 (`[IO.File]::ReadAllText` and `WriteAllText`), and use HTML entities in the SVG |
+| `measure-deploy.ps1` was blocked: "running scripts is disabled on this system" | The default PowerShell execution policy | Ran it with `powershell -NoProfile -ExecutionPolicy Bypass -File`, which applies to that one process only |
 
 ## Reference
 
@@ -304,15 +369,17 @@ Real problems hit while building this lab.
 | `providers.tf` | Provider versions (azurerm, random, time) |
 | `backend.tf` | Remote state in Azure Storage, key `s2d-lab.tfstate` |
 | `variables.tf` | All input variables |
-| `main.tf` | Resource group, VNet (DNS = DC01), subnet, NSG |
-| `compute.tf` | Generated admin password, DC01 VM, public IP, NIC, auto-shutdown |
-| `dc_promotion.tf` | The DC promotion script and its Custom Script Extension |
-| `nodes.tf` | Availability set, S2DN1 and S2DN2, `HwTimeout` prep, wait for the DC, domain join |
-| `s2d_storage.tf` | Managed data disks and attachments (`setproduct` over nodes and disks) |
-| `witness.tf` | Storage account for the cloud witness |
-| `cluster.tf` | Wait for the nodes, then create the cluster and configure the witness |
-| `s2d.tf` | Validation, `Enable-ClusterS2D`, health setting, `Volume1`, failover test |
+| `main.tf` | The generated admin password and the three module calls |
+| `moved.tf` | `moved` blocks that map the old resource addresses to the modules |
 | `outputs.tf` | IPs, admin user, node names, disks per node, and the sensitive password and witness key |
+| `modules/network/` | Resource group, VNet (DNS = DC01), subnet, NSG |
+| `modules/domain_controller/` | DC01 VM, public IP, NIC, auto-shutdown, and the AD DS promotion extension |
+| `modules/cluster/nodes.tf` | Availability set, nodes, `HwTimeout` prep, domain join |
+| `modules/cluster/s2d_storage.tf` | Managed data disks and attachments (`setproduct` over nodes and disks) |
+| `modules/cluster/witness.tf` | Storage account for the cloud witness |
+| `modules/cluster/readiness.tf` | The two readiness checks and the dependency placeholder |
+| `modules/cluster/cluster.tf` | Create the cluster, add missing nodes, configure the witness |
+| `modules/cluster/s2d.tf` | Validation, `Enable-ClusterS2D`, health setting, volumes, failover test |
 | `terraform.tfvars.example` | Template for your private `terraform.tfvars` |
 | `scripts/measure-deploy.ps1` | Times plan and apply and writes a per-resource report |
 | `docs/images/banner-s2d.svg` | README banner |
@@ -342,6 +409,7 @@ Real problems hit while building this lab.
 | `s2d_disk_size_gb` | `128` | Size of each data disk |
 | `s2d_disk_sku` | `Premium_LRS` | Data disk SKU (validated) |
 | `s2d_volume_size_gb` | `200` | Size of `Volume1` |
+| `s2d_extra_volumes` | `{}` | Extra volumes by name: `size_gb`, `copies` (0, 2 or 3) and an optional `tier_template` such as `MirrorOnHDD` |
 | `shutdown_time` | `2300` | Daily auto-shutdown time (HHmm) |
 | `shutdown_timezone` | `Central America Standard Time` | Time zone for the shutdown schedule |
 
@@ -367,11 +435,13 @@ Real problems hit while building this lab.
 
 ## Roadmap
 
-- [ ] Measure the deployment time with `scripts/measure-deploy.ps1` and add a timing table
-- [ ] Replace the fixed waits with readiness checks
-- [ ] Add a third node (`Add-ClusterNode`) and compare two-way and three-way mirror volumes
-- [ ] Try a tiered volume with the `MirrorOnHDD` template
-- [ ] Split the configuration into modules shared with the WSFC lab
+- [x] Measure the deployment time with `scripts/measure-deploy.ps1` (first run: 29 min 17 s)
+- [x] Replace the fixed waits with readiness checks
+- [x] Add a third node (`Add-ClusterNode`) and compare two-way and three-way mirror volumes
+- [x] Try a volume from the `MirrorOnHDD` template (Azure reports HDD, so there is no real tiering)
+- [x] Split the configuration into modules, with a refactor that planned zero changes
+- [ ] Re-measure the build time on the modules and the new join check
+- [ ] Publish the modules so the WSFC lab can reuse them
 - [ ] Replace default outbound access with a NAT gateway or a storage service endpoint
 - [ ] Move secrets to Key Vault, with separate domain admin and DSRM passwords
 - [ ] Azure Bastion instead of a public IP on DC01
