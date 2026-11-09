@@ -23,8 +23,8 @@ This is the storage-enabled sibling of my [azure-wsfc-lab](https://github.com/an
 | | |
 |---|---|
 | **Result** | AD DS forest `s2d.local`, a failover cluster `S2D-CLUS` with a cloud witness, an S2D pool built from the data disks and a 200 GB two-way mirror volume `Volume1` as a CSV. A third node and extra volumes are optional |
-| **Size** | 44 Terraform resources in the measured two-node build: 3 VMs (`Standard_B2ms`), 8 x 128 GB Premium SSD data disks and 1 availability set, split into three modules |
-| **Measured build time** | 29 min 17 s from an empty resource group: plan 23 s, apply 28 min 54 s (measured 2026-11-09 UTC, before the module refactor). It is re-measured on the modules in a final run |
+| **Size** | 45 Terraform resources in the measured two-node build: 3 VMs (`Standard_B2ms`), 8 x 128 GB Premium SSD data disks and 1 availability set, split into three modules |
+| **Measured build time** | 17 min 53 s from an empty resource group: plan 23 s, apply 17 min 30 s, of which 3 min are readiness checks (measured 2026-11-09 UTC, two nodes, on the modules) |
 | **Tested with** | Terraform 1.17.0, azurerm 4.81.0, region `centralus`, tested 2026-11-08 and 2026-11-09. Also tested with three nodes and extra volumes |
 | **Skills shown** | Terraform (modules, `moved` blocks, `for_each`, `setproduct`), Azure compute and managed disks, S2D in guest VMs, unattended AD DS and clustering, readiness checks, troubleshooting |
 
@@ -87,20 +87,20 @@ flowchart TD
 
 The S2D stage runs as a scheduled task under the domain admin account and logs to `C:\enable-s2d.log` and `C:\s2d-worker.log` on the first node. The readiness check on DC01 logs to `C:\wait-for-join.log`.
 
-Measured with `scripts/measure-deploy.ps1` on an empty resource group (two nodes, before the module refactor). The stages run one after the other on the critical path:
+Measured with `scripts/measure-deploy.ps1` on 2026-11-09 UTC, from an empty resource group, with two nodes and the modules. The stages run one after the other on the critical path:
 
 | Stage | Time |
 |---|---|
-| Network and the DC01 VM, before the promotion starts | about 1 min 34 s |
-| DC01 promotion extension (the node VMs, disks and node prep finish in parallel, by about 4 min 48 s) | 8 min 17 s |
-| Readiness check 1: wait for the domain controller | 2 min 05 s |
-| Node domain joins (in parallel) | about 25 s |
-| Readiness check 2: wait for the joins | 5 min 10 s |
-| Cluster creation and witness (Run Command) | 5 min 24 s |
-| S2D stage (Run Command) | 5 min 52 s |
-| **Plan 23 s + apply 28 min 54 s** | **29 min 17 s** |
+| Network and the DC01 VM, before the promotion starts | 1 min 54 s |
+| DC01 promotion extension (the node VMs, disks and node prep finish in parallel, by 5 min 01 s) | 4 min 50 s |
+| Readiness check 1: wait for the domain controller | 2 min 15 s |
+| Node domain joins (in parallel) | about 26 s |
+| Readiness check 2: wait for the joins | 45 s |
+| Cluster creation and witness (Run Command) | 3 min 34 s |
+| S2D stage (Run Command) | 3 min 39 s |
+| **Plan 23 s + apply 17 min 30 s** | **17 min 53 s** |
 
-Readiness check 1 took 2 min 05 s, against the 5 minutes of the fixed wait it replaced. The 5 min 10 s for check 2 is the first version of that check, which fell back to a fixed 5-minute rule because it never saw the node restart. It was replaced by a boot-time comparison. When the third node was added, the new check passed 42 seconds after that node's join. The final timed run uses the new check.
+The two readiness checks took 3 min 00 s together. An earlier run, before the module refactor and with the first version of the join check, took 29 min 17 s (apply 28 min 54 s). That run is not a clean comparison, because Azure was also slower on stages the checks do not touch: the DC01 promotion took 8 min 17 s then against 4 min 50 s now, and the S2D stage 5 min 52 s against 3 min 39 s. The difference that does come from the checks is the join check. The first version took 5 min 10 s, because it never saw the node restart and fell back to a fixed 5-minute rule. The boot-time check took 45 seconds.
 
 ## Quick start
 
@@ -354,7 +354,7 @@ Real problems hit while building this lab.
 | A replaced Run Command finished in 49 seconds without running the script, and an earlier one hung until Terraform timed out | A Run Command re-created under the same name was not executed again by the guest (observed behaviour, I did not confirm the cause on the Azure side) | Added a short hash of the script to the Run Command name, so every script change is a new command that runs |
 | `polling after CreateOrUpdate: context deadline exceeded` after 30 minutes on the S2D step | Terraform's default create timeout is 30 minutes and the guest worker allows 40, and in this case the command never started | Added `timeouts { create = "45m" }` to the S2D Run Command |
 | `az vm run-command invoke` failed with "Run command extension execution is in progress" (Conflict), and later hung | The timed-out `enable-s2d` command was still marked as running on the VM, and the nightly auto-shutdown later deallocated the VMs | Read the logs over RDP through DC01, deleted the orphan with `az vm run-command delete`, and started DC01 first, then the nodes |
-| The first join check took 5 min 10 s, longer than the 4-minute wait it replaced | It never saw the node go down, so it fell back to its rule that the computer account must be 5 minutes old | Replaced it with a comparison of each node's real boot time against its join time. On the third node it passed 42 seconds after the join |
+| The first join check took 5 min 10 s, longer than the 4-minute wait it replaced | It never saw the node go down, so it fell back to its rule that the computer account must be 5 minutes old | Replaced it with a comparison of each node's real boot time against its join time. It passed 42 seconds after the join on the third node and took 45 seconds on the final clean build |
 | The timing report showed one minute too many for any value with 30 or more seconds | `Format-Span` used `[int]` on the minutes, which rounds | Switched to `[math]::Floor`. The first S2D build is 29 min 17 s, not 30 min 17 s |
 | `Â·` appeared in the README and the banner after editing them in PowerShell | Windows PowerShell read the UTF-8 files with the system code page and wrote them back damaged | Read and write the files with explicit UTF-8 (`[IO.File]::ReadAllText` and `WriteAllText`), and use HTML entities in the SVG |
 | `measure-deploy.ps1` was blocked: "running scripts is disabled on this system" | The default PowerShell execution policy | Ran it with `powershell -NoProfile -ExecutionPolicy Bypass -File`, which applies to that one process only |
@@ -440,7 +440,7 @@ Real problems hit while building this lab.
 - [x] Add a third node (`Add-ClusterNode`) and compare two-way and three-way mirror volumes
 - [x] Try a volume from the `MirrorOnHDD` template (Azure reports HDD, so there is no real tiering)
 - [x] Split the configuration into modules, with a refactor that planned zero changes
-- [ ] Re-measure the build time on the modules and the new join check
+- [x] Re-measure the build time on the modules and the new join check (17 min 53 s)
 - [ ] Publish the modules so the WSFC lab can reuse them
 - [ ] Replace default outbound access with a NAT gateway or a storage service endpoint
 - [ ] Move secrets to Key Vault, with separate domain admin and DSRM passwords
