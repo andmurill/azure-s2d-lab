@@ -127,7 +127,7 @@ locals {
 resource "azurerm_virtual_machine_run_command" "enable_s2d" {
   # The name carries a hash of the script so a changed script always runs as a new command.
   name               = "enable-s2d-${substr(md5(local.s2d_script), 0, 6)}"
-  location           = azurerm_resource_group.lab.location
+  location           = var.location
   virtual_machine_id = azurerm_windows_virtual_machine.node[local.first_node].id
 
   source {
@@ -141,7 +141,7 @@ resource "azurerm_virtual_machine_run_command" "enable_s2d" {
 
   protected_parameter {
     name  = "AdminPassword"
-    value = random_password.admin.result
+    value = var.admin_password
   }
 
   # The guest worker allows up to 40 minutes, so Terraform must wait longer than its 30-minute default.

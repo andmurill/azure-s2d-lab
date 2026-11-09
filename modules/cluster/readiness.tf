@@ -1,6 +1,11 @@
 # Readiness checks that replace the fixed time_sleep waits.
 # Each one polls the real condition instead of waiting a fixed time.
 
+# Makes everything below wait for the domain controller promotion in the other module.
+resource "terraform_data" "dc_promoted" {
+  input = var.dc_promotion_id
+}
+
 locals {
   # 'S2DN1'='10.10.1.11'; 'S2DN2'='10.10.1.12'
   node_map_ps = join("; ", [for k, v in var.node_names : "'${k}'='${v}'"])
@@ -10,7 +15,7 @@ locals {
 # and DNS all answer, three times in a row. Runs on a node, which does not reboot here.
 resource "azurerm_virtual_machine_run_command" "wait_for_dc" {
   name               = "wait-for-dc"
-  location           = azurerm_resource_group.lab.location
+  location           = var.location
   virtual_machine_id = azurerm_windows_virtual_machine.node[local.first_node].id
 
   source {
@@ -37,7 +42,7 @@ resource "azurerm_virtual_machine_run_command" "wait_for_dc" {
     EOT
   }
 
-  depends_on = [azurerm_virtual_machine_extension.dc01_promote]
+  depends_on = [terraform_data.dc_promoted]
 }
 
 # Waits until every node is in the domain and has finished the join restart.
@@ -46,8 +51,8 @@ resource "azurerm_virtual_machine_run_command" "wait_for_dc" {
 # after the join means the join restart is done. Progress goes to C:\wait-for-join.log.
 resource "azurerm_virtual_machine_run_command" "wait_for_join" {
   name               = "wait-for-join-${substr(md5(local.node_list_ps), 0, 6)}"
-  location           = azurerm_resource_group.lab.location
-  virtual_machine_id = azurerm_windows_virtual_machine.dc01.id
+  location           = var.location
+  virtual_machine_id = var.dc_vm_id
 
   source {
     script = <<-EOT
@@ -100,7 +105,7 @@ resource "azurerm_virtual_machine_run_command" "wait_for_join" {
 
   protected_parameter {
     name  = "AdminPassword"
-    value = random_password.admin.result
+    value = var.admin_password
   }
 
   depends_on = [azurerm_virtual_machine_extension.node_join]

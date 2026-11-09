@@ -6,8 +6,8 @@ resource "random_string" "witness" {
 
 resource "azurerm_storage_account" "witness" {
   name                            = "stwitness${random_string.witness.result}"
-  resource_group_name             = azurerm_resource_group.lab.name
-  location                        = azurerm_resource_group.lab.location
+  resource_group_name             = var.resource_group_name
+  location                        = var.location
   account_tier                    = "Standard"
   account_replication_type        = "LRS"
   min_tls_version                 = "TLS1_2"

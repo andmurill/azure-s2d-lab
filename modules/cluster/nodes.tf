@@ -1,7 +1,7 @@
 resource "azurerm_availability_set" "nodes" {
   name                         = "avset-${var.prefix}-nodes"
-  location                     = azurerm_resource_group.lab.location
-  resource_group_name          = azurerm_resource_group.lab.name
+  location                     = var.location
+  resource_group_name          = var.resource_group_name
   platform_fault_domain_count  = 2
   platform_update_domain_count = 5
   managed                      = true
@@ -10,12 +10,12 @@ resource "azurerm_availability_set" "nodes" {
 resource "azurerm_network_interface" "node" {
   for_each            = var.node_names
   name                = "nic-${lower(each.key)}"
-  location            = azurerm_resource_group.lab.location
-  resource_group_name = azurerm_resource_group.lab.name
+  location            = var.location
+  resource_group_name = var.resource_group_name
 
   ip_configuration {
     name                          = "ipconfig1"
-    subnet_id                     = azurerm_subnet.nodes.id
+    subnet_id                     = var.subnet_id
     private_ip_address_allocation = "Static"
     private_ip_address            = each.value
   }
@@ -25,12 +25,12 @@ resource "azurerm_windows_virtual_machine" "node" {
   for_each              = var.node_names
   name                  = each.key
   computer_name         = each.key
-  location              = azurerm_resource_group.lab.location
-  resource_group_name   = azurerm_resource_group.lab.name
+  location              = var.location
+  resource_group_name   = var.resource_group_name
   size                  = var.node_vm_size
   availability_set_id   = azurerm_availability_set.nodes.id
   admin_username        = var.admin_username
-  admin_password        = random_password.admin.result
+  admin_password        = var.admin_password
   network_interface_ids = [azurerm_network_interface.node[each.key].id]
 
   os_disk {
@@ -50,7 +50,7 @@ resource "azurerm_windows_virtual_machine" "node" {
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "node" {
   for_each              = var.node_names
   virtual_machine_id    = azurerm_windows_virtual_machine.node[each.key].id
-  location              = azurerm_resource_group.lab.location
+  location              = var.location
   enabled               = true
   daily_recurrence_time = var.shutdown_time
   timezone              = var.shutdown_timezone
@@ -75,7 +75,7 @@ locals {
 resource "azurerm_virtual_machine_run_command" "node_prep" {
   for_each           = var.node_names
   name               = "node-prep"
-  location           = azurerm_resource_group.lab.location
+  location           = var.location
   virtual_machine_id = azurerm_windows_virtual_machine.node[each.key].id
 
   source {
@@ -101,7 +101,7 @@ resource "azurerm_virtual_machine_extension" "node_join" {
   })
 
   protected_settings = jsonencode({
-    Password = random_password.admin.result
+    Password = var.admin_password
   })
 
   depends_on = [

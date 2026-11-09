@@ -12,8 +12,8 @@ locals {
 resource "azurerm_managed_disk" "s2d" {
   for_each             = local.s2d_disks
   name                 = "disk-${lower(each.key)}"
-  location             = azurerm_resource_group.lab.location
-  resource_group_name  = azurerm_resource_group.lab.name
+  location             = var.location
+  resource_group_name  = var.resource_group_name
   storage_account_type = var.s2d_disk_sku
   create_option        = "Empty"
   disk_size_gb         = var.s2d_disk_size_gb

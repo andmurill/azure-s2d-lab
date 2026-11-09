@@ -1,17 +1,17 @@
 output "resource_group_name" {
-  value = azurerm_resource_group.lab.name
+  value = module.network.resource_group_name
 }
 
 output "subnet_id" {
-  value = azurerm_subnet.nodes.id
+  value = module.network.subnet_id
 }
 
 output "dc01_public_ip" {
-  value = azurerm_public_ip.dc01.ip_address
+  value = module.domain_controller.public_ip
 }
 
 output "dc01_private_ip" {
-  value = azurerm_network_interface.dc01.private_ip_address
+  value = module.domain_controller.private_ip
 }
 
 output "admin_username" {
@@ -24,16 +24,16 @@ output "admin_password" {
 }
 
 output "witness_account_name" {
-  value = azurerm_storage_account.witness.name
+  value = module.cluster.witness_account_name
 }
 
 output "witness_account_key" {
-  value     = azurerm_storage_account.witness.primary_access_key
+  value     = module.cluster.witness_account_key
   sensitive = true
 }
 
 output "node_names" {
-  value = sort(keys(var.node_names))
+  value = module.cluster.node_names
 }
 
 output "s2d_disk_count_per_node" {

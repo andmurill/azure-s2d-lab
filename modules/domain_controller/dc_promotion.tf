@@ -13,7 +13,7 @@ locals {
       Write-Log 'Installing the AD DS role'
       Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
       Write-Log 'Promoting to a new forest'
-      $safe = ConvertTo-SecureString '${random_password.admin.result}' -AsPlainText -Force
+      $safe = ConvertTo-SecureString '${var.admin_password}' -AsPlainText -Force
       Install-ADDSForest -DomainName '${var.domain_name}' -DomainNetbiosName '${var.domain_netbios}' -SafeModeAdministratorPassword $safe -InstallDns -NoRebootOnCompletion -Force | Out-Null
       Write-Log 'Promotion finished - restarting in 30 seconds'
       shutdown.exe /r /t 30 /c "AD DS promotion finished - restarting"

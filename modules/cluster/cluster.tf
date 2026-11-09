@@ -89,7 +89,7 @@ locals {
 
 resource "azurerm_virtual_machine_run_command" "create_cluster" {
   name               = "create-cluster-${substr(md5(local.cluster_script), 0, 6)}"
-  location           = azurerm_resource_group.lab.location
+  location           = var.location
   virtual_machine_id = azurerm_windows_virtual_machine.node[local.first_node].id
 
   source {
@@ -108,7 +108,7 @@ resource "azurerm_virtual_machine_run_command" "create_cluster" {
 
   protected_parameter {
     name  = "AdminPassword"
-    value = random_password.admin.result
+    value = var.admin_password
   }
 
   protected_parameter {

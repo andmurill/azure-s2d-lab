@@ -34,8 +34,8 @@ filter Add-Stamp {
 
 function Format-Span([double]$Seconds) {
   $t = [TimeSpan]::FromSeconds([math]::Round($Seconds))
-  if ($t.TotalHours -ge 1) { return '{0}h {1:00}m {2:00}s' -f [int]$t.TotalHours, $t.Minutes, $t.Seconds }
-  return '{0}m {1:00}s' -f [int]$t.TotalMinutes, $t.Seconds
+  if ($t.TotalHours -ge 1) { return '{0}h {1:00}m {2:00}s' -f [int][math]::Floor($t.TotalHours), $t.Minutes, $t.Seconds }
+  return '{0}m {1:00}s' -f [int][math]::Floor($t.TotalMinutes), $t.Seconds
 }
 
 function ConvertTo-Seconds([string]$Text) {
@@ -104,7 +104,7 @@ $rows = @($done | ForEach-Object {
   }
 })
 
-$waitSec = ($rows | Where-Object { $_.Resource -like 'time_sleep.*' } | Measure-Object -Property DurSec -Sum).Sum
+$waitSec = ($rows | Where-Object { $_.Resource -like '*time_sleep.*' -or $_.Resource -like '*wait_for_*' } | Measure-Object -Property DurSec -Sum).Sum
 if (-not $waitSec) { $waitSec = 0 }
 
 $longest = $rows | Sort-Object DurSec -Descending | Select-Object -First 6 |
@@ -120,7 +120,7 @@ $report += ('Resources created: ' + $rows.Count)
 $report += ('Plan:              ' + (Format-Span $planSeconds))
 $report += ('Apply:             ' + (Format-Span $applySeconds))
 $report += ('Total:             ' + (Format-Span ($planSeconds + $applySeconds)))
-$report += ('Built-in waits:    ' + (Format-Span $waitSec) + ' (time_sleep resources, part of the apply)')
+$report += ('Waits and checks:  ' + (Format-Span $waitSec) + ' (time_sleep and wait_for_* readiness checks, part of the apply)')
 $report += ''
 $report += 'Longest resources:'
 $report += $longest
